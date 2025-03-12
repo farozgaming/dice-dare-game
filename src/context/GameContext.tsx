@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { toast } from '@/hooks/use-toast';
 
@@ -21,6 +20,7 @@ interface GameContextProps {
   hasCashedOut: boolean;
   userBalance: number;
   streakCount: number;
+  multiplierHistory: number[];
   setGameState: (state: GameState) => void;
   setBetAmount: (amount: number) => void;
   setAutoCashoutAt: (value: number) => void;
@@ -41,6 +41,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [hasCashedOut, setHasCashedOut] = useState<boolean>(false);
   const [userBalance, setUserBalance] = useState<number>(1250.00);
   const [streakCount, setStreakCount] = useState<number>(0);
+  const [multiplierHistory, setMultiplierHistory] = useState<number[]>([]);
   const [betHistory, setBetHistory] = useState<BetHistory[]>([
     { id: 1, multiplier: 1.24, crashed: false },
     { id: 2, multiplier: 3.81, crashed: false },
@@ -52,21 +53,19 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     { id: 8, multiplier: 1.37, crashed: false },
   ]);
 
-  // Game difficulty adjustment
   const getCrashProbability = () => {
-    // Dynamic crash probability based on streak
-    // The more successful cashouts in a row, the higher chance of crash
-    const baseProbability = 0.02;
-    const streakFactor = streakCount * 0.005;
-    return Math.min(baseProbability + streakFactor, 0.1); // Max 10% crash chance per tick
+    const baseMultiplierFactor = Math.pow(currentMultiplier, 1.5) * 0.01;
+    const streakFactor = Math.min(streakCount * 0.008, 0.05);
+    const randomFactor = Math.random() * 0.02;
+    const houseEdge = currentMultiplier > 3 ? 0.03 : 0.01;
+    return Math.min(baseMultiplierFactor + streakFactor + randomFactor + houseEdge, 0.12);
   };
 
-  // Game loop
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     
     if (gameState === 'waiting') {
-      // Countdown phase
+      setMultiplierHistory([]);
       interval = setInterval(() => {
         setCountdown((prev) => {
           if (prev <= 1) {
@@ -78,30 +77,25 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
       }, 1000);
     } else if (gameState === 'in-progress') {
-      // Game running, increase multiplier with dynamic speed
       interval = setInterval(() => {
         setCurrentMultiplier((prev) => {
-          // Increasing difficulty - slower growth at higher multipliers
-          const speedFactor = Math.max(1 - (prev * 0.03), 0.4);
-          const increase = (Math.random() * 0.03 + 0.01) * speedFactor;
+          const speedFactor = Math.max(0.9 - (Math.log(prev) * 0.1), 0.3);
+          const increase = (Math.random() * 0.02 + 0.01) * speedFactor;
           const newValue = parseFloat((prev + increase).toFixed(2));
           
-          // Auto cashout if betting
+          setMultiplierHistory(history => [...history, newValue]);
+          
           if (isBetting && !hasCashedOut && newValue >= autoCashoutAt) {
             cashOut();
           }
           
-          // Dynamic crash logic
-          if (Math.random() < getCrashProbability() || newValue > 10) {
+          if (Math.random() < getCrashProbability() || newValue > 20) {
             clearInterval(interval!);
             
-            // If still betting, mark as loss
             if (isBetting && !hasCashedOut) {
               setHasCashedOut(false);
-              // Reset streak on crash
               setStreakCount(0);
               
-              // Show toast for crash
               toast({
                 title: "Busted!",
                 description: `The game crashed at ${newValue.toFixed(2)}x`,
@@ -111,13 +105,11 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
             
             setGameState('crashed');
             
-            // Add to history
             setBetHistory((prev) => [
               { id: Date.now(), multiplier: newValue, crashed: true },
               ...prev.slice(0, 19)
             ]);
             
-            // Reset after short delay
             setTimeout(() => {
               setGameState('waiting');
               setCurrentMultiplier(1.00);
@@ -145,7 +137,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setHasCashedOut(false);
       setUserBalance(prev => prev - betAmount);
       
-      // Notify user
       toast({
         title: "Bet Placed",
         description: `$${betAmount.toFixed(2)} bet placed with auto-cashout at ${autoCashoutAt}x`,
@@ -163,21 +154,17 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (gameState === 'in-progress' && isBetting && !hasCashedOut) {
       setHasCashedOut(true);
       
-      // Calculate winnings
       const winnings = betAmount * currentMultiplier;
       setUserBalance(prev => prev + winnings);
       
-      // Increment streak
       setStreakCount(prev => prev + 1);
       
-      // Show success toast
       toast({
         title: "Cash Out Successful!",
         description: `You won $${(winnings - betAmount).toFixed(2)} at ${currentMultiplier.toFixed(2)}x`,
         variant: "default"
       });
       
-      // Add to history
       setBetHistory((prev) => [
         { id: Date.now(), multiplier: currentMultiplier, crashed: false },
         ...prev.slice(0, 19)
@@ -188,7 +175,6 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const cancelBet = () => {
     if (gameState === 'waiting') {
       setIsBetting(false);
-      // Refund bet amount
       setUserBalance(prev => prev + betAmount);
       
       toast({
@@ -211,6 +197,7 @@ export const GameProvider: React.FC<{ children: React.ReactNode }> = ({ children
         hasCashedOut,
         userBalance,
         streakCount,
+        multiplierHistory,
         setGameState,
         setBetAmount,
         setAutoCashoutAt,
